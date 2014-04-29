@@ -1,3 +1,5 @@
+import java.util.Random;
+
 /**
  * Implements a Fluid Neural Network as described in:
  * 		Sole and Miramontes
@@ -98,10 +100,6 @@ public class FluidNN {
 
 	}
 
-
-	
-	// create a FluidNN of a given size with a given number of neurons (randomly placed)
-	// and with specified values for the parameters
 	public FluidNN (int numRows, int numCols, int numNeurons, double gain,
 			double sumNeighborActivationsThreshold, double activationThreshold, 
 			double spontaneousActivationLevel, double spontaneousActivationProbability) {
@@ -133,7 +131,53 @@ public class FluidNN {
 		this.spontaneousActivationProbability = spontaneousActivationProbability;
 
 	}
+	
+	
+	// create a FluidNN of a given size with a given number of neurons (randomly placed)
+	// and with specified values for the parameters
+	public FluidNN (int numRows, int numCols, int numNeurons, double p) {
 
+		this.numRows = numRows;
+		this.numCols = numCols;
+		neuronList = new Neuron[numNeurons];
+		grid = new Neuron[numRows][numCols];
+		this.numNeurons = numNeurons;
+		
+		randomSequentialPopulate(numNeurons, p);
+	}
+
+	public void randomSequentialPopulate(int numNeurons, double probability) {
+		if (numNeurons > numRows * numCols) {
+			System.out.println("Grid is too small for " + numNeurons + " neurons");
+			System.exit(0);
+		}
+		Random r = new Random();
+		int count = 0;
+		int n = 0;
+		Neuron tempNeuron;
+		do {
+//			n++;
+//			if (n > 1000) {
+//				System.out.println(numRows + " " + numCols + " " + probability + " " + numNeurons);
+//				System.out.println("Initialization took too long");
+//				System.exit(0);
+//			}
+			neuronList = new Neuron[numNeurons];
+			count = 0;
+			for (int i = 0; i < numRows; i ++) {
+				for (int j = 0; j < numCols; j++) {
+					grid[i][j] = null;
+					if (r.nextDouble() < probability) {
+						double initialActivationLevel = INITIAL_ACTIVATION_LOW_LEVEL + (r.nextDouble() * INITIAL_ACTIVATION_RANGE);
+						tempNeuron = new Neuron(count, i, j, initialActivationLevel, 0.0, this);
+						grid[i][j] = tempNeuron;
+						if (count < numNeurons) neuronList[count] = tempNeuron;
+						count ++;
+					}
+				}
+			}
+		} while(count != numNeurons);
+	}
 
 
 	// put a specified number of neurons in the net at random locations; 
@@ -381,6 +425,22 @@ public class FluidNN {
 		return neighborhood;
 	}
 	
+	public Neuron[] getNeighborhood(Neuron neuron, PSOPercolation.Topology topology, PSOPercolation.SelfModel selfModel, 
+			PSOPercolation.BoundaryModel boundaryModel, PSOPercolation.ActivityModel activityModel) {
+
+		Neuron[] neighborhood = null;
+
+		if (topology == PSOPercolation.Topology.FNN_MOORE) {
+			neighborhood = getMooreNeighbors(neuron, selfModel, boundaryModel, activityModel);			
+		}
+		else {
+			System.out.println("error:  unknown topology in FluidNN.getNeigborhood"); 
+			System.exit(-1);
+		}
+
+		return neighborhood;
+	}
+	
 
 
 	
@@ -595,7 +655,43 @@ public class FluidNN {
 
 	}
 
+	// returns a list of neurons in the neighborhood
+	public Neuron[] getMooreNeighbors (Neuron neuron, PSOPercolation.SelfModel selfModel, PSOPercolation.BoundaryModel boundaryModel, 
+			PSOPercolation.ActivityModel activityModel) {
 
+		// create an array that can hold the maximum number of neurons in the neighborhood, including the neuron itself
+		Neuron[] possibleNeighbors = new Neuron[9];
+		int numNeigh = 0;
+
+		// this will also consider the neuron itself;
+		// NOTE: we could potentially check here if the currentSelfModel is INCLUDE_SELF, but we would also have to 
+		// check the current activity model; isNeighbor does both, so call isNeighbor 
+		for (int rDelta = -1 ; rDelta <= 1 ; ++rDelta) {
+			for (int cDelta = -1 ; cDelta <= 1 ; ++cDelta) {
+				Neuron possibleNeighbor = getNeighbor(neuron, rDelta, cDelta, selfModel, boundaryModel, activityModel);
+				if (possibleNeighbor != null)
+					possibleNeighbors[numNeigh++] = possibleNeighbor;
+			}
+		}
+
+		// if all the possible neurons are in the neighborhood, can just return the array 
+		// they are already in
+		if (numNeigh == 9) {   // 9 includes the neuron whose neighbors we are determining
+			return possibleNeighbors;
+		}
+
+		// otherwise transfer the members of the neighborhood to an array that's exactly large 
+		// enough to hold them
+		Neuron[] actualNeighbors = new Neuron[numNeigh];
+		for (int i = 0 ; i < numNeigh ; ++i) {
+			actualNeighbors[i] = possibleNeighbors[i];
+		}
+
+		return actualNeighbors;
+
+	}
+
+	
 	// checks to see if there is a neuron at (row + rDelta, col + cDelta),wrapping around if
 	// the boundary model is a torus, and, if there is, returns that neuron if it is consistent
 	// with the self model and the activity model
@@ -723,7 +819,51 @@ public class FluidNN {
 
 	}
 
+	// checks to see if there is a neuron at (row + rDelta, col + cDelta),wrapping around if
+	// the boundary model is a torus, and, if there is, returns that neuron if it is consistent
+	// with the self model and the activity model
+	public Neuron getNeighbor (Neuron neuron, int rDelta, int cDelta, PSOPercolation.SelfModel selfModel, 
+			PSOPercolation.BoundaryModel boundaryModel, PSOPercolation.ActivityModel activityModel) {
 
+		int row = neuron.getRow();
+		int col = neuron.getCol();
+
+		Neuron neighbor = null;
+
+		if (selfModel == PSOPercolation.SelfModel.INCLUDE_SELF) {
+				
+
+			if (boundaryModel == PSOPercolation.BoundaryModel.LATTICE) {
+
+				int neighRow = row + rDelta;
+				int neighCol = col + cDelta;
+
+				if (activityModel == PSOPercolation.ActivityModel.ONLY_ACTIVE_NEURONS) {
+					if (legalCell(neighRow, neighCol) && (grid[neighRow][neighCol] != null) && grid[neighRow][neighCol].active())
+						neighbor = grid[neighRow][neighCol];
+				}
+
+				else if (activityModel == PSOPercolation.ActivityModel.ALL_NEURONS) {				
+					if (legalCell(neighRow, neighCol) && (grid[neighRow][neighCol] != null))
+						neighbor = grid[neighRow][neighCol];
+				}
+				
+				else if (activityModel == PSOPercolation.ActivityModel.SIMILAR_ACTIVITY_STATUS_NEURONS) {
+					if (legalCell(neighRow, neighCol) && grid[neighRow][neighCol] != null) {
+						boolean sameActivityStatus = (neuron.active() && grid[neighRow][neighCol].active()) || 
+						  							(!neuron.active() && !grid[neighRow][neighCol].active());
+						if (sameActivityStatus)
+							neighbor = grid[neighRow][neighCol];
+					}
+				}
+			}
+
+		}
+
+		// could be null
+		return neighbor;
+
+	}
 
 
 

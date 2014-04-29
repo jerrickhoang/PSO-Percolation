@@ -326,7 +326,8 @@ public class TestFunctions {
 
 	public static double[] evalWithError(DoubleVector v, int functionNum) {
 
-		++PSO.currentFENum;
+		//++PSO.currentFENum;
+		++PSOPercolation.currentFENum;
 		//		System.out.println("                in TF  numFunctionEvaluations = " + PSO.numFunctionEvaluations);
 
 		// gets assigned an array with two values:

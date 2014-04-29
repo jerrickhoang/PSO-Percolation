@@ -248,7 +248,7 @@ public class DoubleVector {
 		
 		double range = highVal - lowVal;
 		for(int i = 0 ; i < vector.length ; ++i)
-			vector[i] *= lowVal + (PSO.rand.nextDouble() * range);
+			vector[i] *= lowVal + (PSOPercolation.rand.nextDouble() * range);
 	}
 
 

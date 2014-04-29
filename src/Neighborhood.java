@@ -57,8 +57,6 @@ public class Neighborhood {
 				}
 
 			}
-
-
 		}
 
 		else if (currentTopology == PSO.Topology.RING) {
@@ -256,7 +254,6 @@ public class Neighborhood {
 
 	}
 
-	
 	public static DoubleVector getNeighBestPositionFNN(Particle particle, PSO.Topology currentPSOTopology, PSO.SelfModel currentPSOSelfModel) {
 
 		// topology and selfModel are sent as parameters because there are loops for them in PSO.java to allow us to try different possibilities
@@ -336,6 +333,61 @@ public class Neighborhood {
 
 	// ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
+
+	public static DoubleVector getVectorToNeighBestPositionFNN(Particle particle, PSOPercolation.Topology currentPSOTopology, PSOPercolation.SelfModel currentPSOSelfModel) {
+
+		DoubleVector neighBestPosition = getNeighBestPositionFNN(particle, currentPSOTopology, currentPSOSelfModel);
+		DoubleVector vectorToNeighBestPosition = DoubleVector.sub(neighBestPosition, particle.getPosition());
+
+		return vectorToNeighBestPosition;
+
+	}
+
+	public static DoubleVector getNeighBestPositionFNN(Particle particle, PSOPercolation.Topology currentPSOTopology, PSOPercolation.SelfModel currentPSOSelfModel) {
+
+		// topology and selfModel are sent as parameters because there are loops for them in PSO.java to allow us to try different possibilities
+		// and we need to send which one is currently being tested
+		// the boundary model and activity model are anticipated to be torus and only-active-neurons so much of the time that these values are
+		// assigned to static variables in PSO.java.  they can be changed, but there is no loop for either of them that would allow us to test
+		// different possibilities, so we just access the static variables here
+		Neuron[] neighNeurons = Swarm.fnn.getNeighborhood(particle.getNeuron(), currentPSOTopology, currentPSOSelfModel, PSOPercolation.currentPSOBoundaryModel, PSOPercolation.currentPSOActivityModel);
+		int numNeuronsInNeigh = neighNeurons.length;
+		
+		
+		Particle bestParticle = null;
+		double bestPBestFuncVal = Double.MAX_VALUE;
+
+		for (int n = 0 ; n < numNeuronsInNeigh ; ++n) {
+			Particle nextParticle = neighNeurons[n].getParticle();
+			
+			// the is actually determined in the call to getNeighborhood; if the self is not to be included, the 
+			// neuron corresponding to this particle is not added into the neighborhood that is returned; this 
+			// code is just double-checking
+			if (currentPSOSelfModel == PSOPercolation.SelfModel.NOT_INCLUDE_SELF && nextParticle.getParticleID() == particle.getParticleID())
+				continue;
+			
+			double nextPBestFuncVal = nextParticle.getPersonalBest().getFunctionValue();
+			if (nextPBestFuncVal < bestPBestFuncVal) {
+				bestParticle = nextParticle;
+				bestPBestFuncVal = nextPBestFuncVal;
+			}
+		}
+
+		// the particle itself may be the only particle in the neighborhood, and, if INCLUDE_SELF
+		// is the case, it will be the "bestParticle" and its pbest position will be returned, BUT
+		// if the particle itself is the only particle in the neighborhood, and NOT_INCLUDE_SELF
+		// is the case, then there are *no* particles in the neighborhood so bestParticle is still null, so send back
+		// position of the particle itself (not its pbest position); this means that in getVectorToNeighBestPositionPM, the
+		// vectorToNeighBestPosition returned will be the particle's position minus its position,
+		// i.e. the zero vector, which is correct since, if the neighborhood is empty, the neighborhood best 
+		// component added to the acceleration being computed in the update method in Particle.java 
+		// should be zero
+		if (bestParticle == null)
+			return particle.getPosition();
+		
+		return bestParticle.getPersonalBest().getPosition();
+
+	}
 
 	
 	

@@ -11,6 +11,70 @@ public class Swarm {
 	private static Neighborhood[] allNeighs;
 
 
+	public Swarm (int numParticles, 
+			int numParticlesIndex, 
+			int functionNum, 
+			int numDimensions, 	
+			PSOPercolation.Topology currentPSOTopology, 
+			PSOPercolation.SelfModel currentPSOSelfModel, 
+			PSOPercolation.InfluenceModel currentPSOInfluenceModel,
+			int latticeSideSizeFNN,  		
+			DataOutput[][] intervalRunData,
+			double probability) {
+
+		// create arrays to hold particle and neighborhoods
+		particles = new Particle[numParticles];   
+		allNeighs = new Neighborhood[numParticles];		
+
+		// array needed to get back function evaluation results from Particle constructor
+		double[] initParticleData = new double[2];    
+
+		// create the particles
+
+		particles[0] = new Particle(functionNum, numDimensions, 0, initParticleData);
+
+		// first one is the current global best
+		int globalBestParticleNum = 0;
+		double globalBestValue = initParticleData[TestFunctions.VAL_INDEX];
+		double globalBestError = initParticleData[TestFunctions.ERR_INDEX];
+
+		// getPosition does not return a copy, but that's okay because Solution constructor makes a copy of the DoubleVector sent in
+		// NOTE: false means it is not an approximated value
+		globalBest = new Solution(particles[0].getPosition(), globalBestValue, globalBestError, 0, globalBestParticleNum, false);
+
+
+		for (int particleID = 1 ; particleID < particles.length ; particleID++) {
+
+			particles[particleID] = new Particle(functionNum, numDimensions, particleID, initParticleData);
+
+			// evaluate
+			double particleValue = initParticleData[TestFunctions.VAL_INDEX];
+			double particleError = initParticleData[TestFunctions.ERR_INDEX];
+
+			if (particleValue < globalBestValue) {  
+				globalBest.copyFromPosition(particles[particleID].getPosition());
+				globalBest.setFunctionValue(particleValue);
+				globalBest.setError(particleError);
+				globalBest.setIterationCreated(0);
+				globalBest.setParticleID(particleID);
+				globalBest.setApproximated(false);
+			}
+
+			if ((PSOPercolation.currentFENum - PSOPercolation.numInitialFEsIgnored) % PSOPercolation.numFEsPerOutputInterval == 0) {
+				int intervalIndex = (PSOPercolation.currentFENum - PSOPercolation.numInitialFEsIgnored) / PSOPercolation.numFEsPerOutputInterval;				
+				intervalRunData[intervalIndex][PSO.currentRunNum].copyDataFromSolution(globalBest);
+			}
+
+		}
+
+		if (PSOPercolation.isFNNTopology(currentPSOTopology)) {
+
+			fnn = new FluidNN(latticeSideSizeFNN, latticeSideSizeFNN, numParticles, probability);
+
+			connectSwarmToFNN();
+		}
+	}
+	
 
 	public Swarm (int numParticles, 
 			int numParticlesIndex, 
@@ -116,10 +180,6 @@ public class Swarm {
 		}
 
 	}
-
-	
-	
-	
 	
 	
 
@@ -127,11 +187,11 @@ public class Swarm {
 			DataOutput[][] intervalData) {
 
 		Neighborhood[] particleNeighs = null;
-		if (PSO.isFNNTopology(currentPSOTopology)) {
-			// updateNeurons returns the particle Neighborhoods that were calculated when the activation levels were updated;
-			// send that to updateParticles so they can be used there instead of recalculating the neighborhoods
-			particleNeighs = updateNeurons(PSO.currentFNNTopology, PSO.currentFNNSelfModel, PSO.currentFNNBoundaryModel, PSO.currentFNNActivityModel);
-		}
+//		if (PSO.isFNNTopology(currentPSOTopology)) {
+//			// updateNeurons returns the particle Neighborhoods that were calculated when the activation levels were updated;
+//			// send that to updateParticles so they can be used there instead of recalculating the neighborhoods
+//			particleNeighs = updateNeurons(PSO.currentFNNTopology, PSO.currentFNNSelfModel, PSO.currentFNNBoundaryModel, PSO.currentFNNActivityModel);
+//		}
 
 		// although updateNeurons returns an array of the Neighborhoods calculated when neuron activations were updated, we no  
 		// longer send it to updateParticles because the topology/selfModel/influenceModel of the PSO can be different from that 
@@ -145,8 +205,48 @@ public class Swarm {
 
 	}
 	
+	public void update (int currentFunctionNum, PSOPercolation.Topology currentPSOTopology, PSOPercolation.SelfModel currentPSOSelfModel, PSOPercolation.InfluenceModel currentPSOInfluenceModel,
+			DataOutput[][] intervalData) {
+		updateParticles(currentFunctionNum, currentPSOTopology, currentPSOSelfModel, currentPSOInfluenceModel, intervalData);
+
+	}
 	
-	
+	public void updateParticles (int currentFunctionNum, PSOPercolation.Topology currentPSOTopology, PSOPercolation.SelfModel currentPSOSelfModel, PSOPercolation.InfluenceModel currentPSOInfluenceModel, 
+			DataOutput[][] intervalData) {
+
+		for (int particleID = 0 ; particleID < particles.length ; particleID++) {
+
+			Solution newSolution = null;			
+			newSolution = particles[particleID].update(currentFunctionNum, currentPSOTopology, currentPSOSelfModel, currentPSOInfluenceModel);  
+
+			
+			double newParticleValue = newSolution.getFunctionValue();      
+
+			if (newParticleValue < globalBest.getFunctionValue()) {
+
+				globalBest.copyFromPosition(newSolution.getPosition());
+				globalBest.setFunctionValue(newParticleValue);
+				globalBest.setError(newSolution.getError());
+				globalBest.setIterationCreated(PSOPercolation.currentIterNum);
+				globalBest.setParticleID(particleID);
+				globalBest.setApproximated(false);
+
+			} // if new global best
+
+			// data is collected based on number of function evaluations; if we are counting iterations, things are set up in PSO.java
+			// so that the number of FEs in each interval is equal to the number of iterations we want in each interval
+			// NOTE: PSO.numInitialFEsIgnored is > 0 only if we are counting iterations, since the FEs when the particles are
+			// created should not count towards the FEs used to count iterations
+			if ((PSOPercolation.currentFENum - PSOPercolation.numInitialFEsIgnored) % PSOPercolation.numFEsPerOutputInterval == 0) {
+				int intervalIndex = (PSOPercolation.currentFENum - PSOPercolation.numInitialFEsIgnored) / PSOPercolation.numFEsPerOutputInterval;
+				intervalData[intervalIndex][PSO.currentRunNum].copyDataFromSolution(globalBest);
+				//				System.out.println("putting item at " + (PSO.currentFunctionEvaluationNum - PSO.numInitialFEsIgnored) + " FEs (not including FEs to create swarm) in index " + intervalRunDataIndex + " of intervalRunData");
+			}
+
+		}  // end for-loop particles
+
+	}   
+
 	public void updateParticles (int currentFunctionNum, PSO.Topology currentPSOTopology, PSO.SelfModel currentPSOSelfModel, PSO.InfluenceModel currentPSOInfluenceModel, 
 			DataOutput[][] intervalData) {
 
@@ -276,8 +376,6 @@ public class Swarm {
 
 	}
 
-
-
 	public void createNeighborhoods(PSO.Topology currentTopology, PSO.SelfModel currentSelfModel, PSO.InfluenceModel currentInfluenceModel, int numParticlesIndex) {
 
 		// this is bad for GBEST, because it's going to create a distinct Neighborhood
@@ -293,7 +391,6 @@ public class Swarm {
 		}
 
 	}
-
 
 	// for each particle, create an array of neighborhoods that it is in
 	public void createNeighLists() {
@@ -330,7 +427,6 @@ public class Swarm {
 			}
 		}
 	}
-
 
 
 	public void showAllNeighborhoods () {

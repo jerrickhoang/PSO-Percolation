@@ -1,3 +1,5 @@
+import java.util.Random;
+
 
 
 
@@ -26,15 +28,14 @@ public class Particle {
 	private Neuron neuron;
 
 	private boolean pBestImproved = false;
-	
 
 	public Particle(int functionNum, int numDimensions, int particleID, double[] sendBackResults) {
 
 		this.particleID = particleID;
-
+		Random r = new Random();
 		position = new DoubleVector(numDimensions);
 		for(int i = 0 ; i < position.size() ; ++i) {
-			position.set(i, TestFunctions.INIT_MIN_VALS[functionNum] + (TestFunctions.INIT_RANGES[functionNum] * PSO.rand.nextDouble()));
+			position.set(i, TestFunctions.INIT_MIN_VALS[functionNum] + (TestFunctions.INIT_RANGES[functionNum] * r.nextDouble()));
 		}
 
 		double[] results = TestFunctions.evalWithError(position, functionNum);
@@ -61,7 +62,7 @@ public class Particle {
 			speedRange = TestFunctions.SPEED_RANGES[functionNum];			
 		}
 		for(int i = 0 ; i < velocity.size() ; ++i) {
-			velocity.set(i, minSpeed + (speedRange * PSO.rand.nextDouble()));
+			velocity.set(i, minSpeed + (speedRange * r.nextDouble()));
 		}
 
 
@@ -233,6 +234,118 @@ public class Particle {
 	}		
 
 	
+	public Solution update(int functionNum, PSOPercolation.Topology currentPSOTopology, PSOPercolation.SelfModel currentPSOSelfModel, PSOPercolation.InfluenceModel currentPSOInfluenceModel) {
+
+
+		// acceleration starts at 0.0
+		DoubleVector acceleration = new DoubleVector(position.size(), 0.0);
+
+		// dynamic topology
+		
+		if (PSOPercolation.isFNNTopology(currentPSOTopology)) {
+
+			// the heavy lifting is done in the Neighborhood class; none of it was done before the
+			// iterations started -- all of it is done dynamically on each iteration
+			if (currentPSOInfluenceModel == PSOPercolation.InfluenceModel.NEIGH_BEST) {
+
+				// neighborhood best component
+				DoubleVector neighborhoodComponent = Neighborhood.getVectorToNeighBestPositionFNN(this, currentPSOTopology, currentPSOSelfModel);
+				
+				neighborhoodComponent.multRandomScalar(0.0, PSO.neighborhoodTheta);
+				acceleration.addVector(neighborhoodComponent);
+				
+				// personal component
+				DoubleVector personalComponent = DoubleVector.sub(personalBest.getPosition(), position);
+				personalComponent.multRandomScalar(0.0, PSO.personalTheta);
+				acceleration.addVector(personalComponent);
+			}
+		}
+		
+		else {
+			System.out.println("error: topology unspecifed in Particle.update");
+			System.exit(-1);
+		}
+
+		
+		
+		// update the velocity and apply the constriction factor
+		velocity.addVector(acceleration);
+		velocity.multScalar(PSO.constrictionFactor);
+
+
+
+		// bound velocity
+		for (int i = 0 ; i < velocity.size() ; ++i) {
+			if (velocity.get(i) < TestFunctions.SPEED_MIN_VALS[functionNum])
+				velocity.set(i, TestFunctions.SPEED_MIN_VALS[functionNum]);
+			else if (velocity.get(i) > TestFunctions.SPEED_MAX_VALS[functionNum])
+				velocity.set(i, TestFunctions.SPEED_MAX_VALS[functionNum]);
+		}
+
+
+		// move the particle 
+		position.addVector(velocity); 
+
+
+		// evaluate the new position and set currentSolution
+		double[] results = TestFunctions.evalWithError(position, functionNum);
+		double newPositionValue = results[TestFunctions.VAL_INDEX];
+		double newPositionError = results[TestFunctions.ERR_INDEX];
+
+		currSolution.copyFromPosition(position);
+		currSolution.setFunctionValue(newPositionValue);
+		currSolution.setError(newPositionError);
+		currSolution.setIterationCreated(PSO.currentIterNum);
+
+		// update the personal best, if necessary
+		pBestImproved = false;
+		if (newPositionValue < personalBest.getFunctionValue()) {
+
+			personalBest.copyFromPosition(position);
+			personalBest.setFunctionValue(newPositionValue);
+			personalBest.setError(newPositionError);
+			personalBest.setIterationCreated(PSO.currentIterNum);
+			
+			pBestImproved = true;
+			
+			// pbest improved, so decrease gain if it's an fnn topology and we're using individual gains
+			if (PSOPercolation.isFNNTopology(currentPSOTopology) && PSO.useIndividualGains) {
+				
+				//			this.getNeuron().setGain(PSO.lowGain);
+				++PSO.totalNumGainDecreases;
+				double reducedGain = this.getNeuron().getGain() - PSO.gainDecrement;
+				if (reducedGain < 0.0) {
+					reducedGain = 0.0;
+				}
+				this.getNeuron().setGain(reducedGain);
+				
+			}
+			
+		}
+		// pbest did not improve, so increase gain if it's an fnn topology and we're using individual gains
+		else if (PSOPercolation.isFNNTopology(currentPSOTopology) && PSO.useIndividualGains) {
+			pBestImproved = false;   // not actually needed, since pBestImproved is set to 
+								     // false before we check for improvement 
+			
+			//			this.getNeuron().setGain(PSO.highGain);
+			++PSO.totalNumGainIncreases;
+			double increasedGain = this.getNeuron().getGain() + PSO.gainIncrement;
+			if (increasedGain > 1.0) {
+				increasedGain = 1.0;
+			}
+			this.getNeuron().setGain(increasedGain);
+
+		}
+
+		
+		if (PSOPercolation.isFNNTopology(currentPSOTopology)) {
+			PSO.sumGainValues += this.getNeuron().getGain();
+		}
+		
+		
+		return currSolution;
+	}		
+
 	
 
 	public boolean pBestImproved () {
